@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>3D-pixel art</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>3D-pixel art</h1>
+            <p class="description">A simple browser studio for painting, saving, and exporting colorful 3D pixel artwork.</p>
+            <p id="saveStatus">Ready</p>
+          </div>
+        </div>
+
+        <div class="quick-actions" aria-label="File actions">
+          <button id="saveBtn" title="Save artwork">Save</button>
+          <button id="loadBtn" title="Load saved artwork">Load</button>
+          <button id="pngBtn" title="Export PNG">PNG</button>
+          <button id="objBtn" title="Export OBJ">OBJ</button>
+        </div>
+      </header>
+
+      <section class="studio">
+        <aside class="panel tool-panel" aria-label="Tools">
+          <div class="tool-grid" role="toolbar" aria-label="Paint tools">
+            <button class="tool active" data-tool="brush" title="Brush" aria-label="Brush">B</button>
+            <button class="tool" data-tool="erase" title="Eraser" aria-label="Eraser">E</button>
+            <button class="tool" data-tool="fill" title="Fill" aria-label="Fill">F</button>
+            <button class="tool" data-tool="picker" title="Color picker" aria-label="Color picker">P</button>
+          </div>
+
+          <div class="control-block">
+            <label for="colorInput">Color</label>
+            <div class="color-row">
+              <input id="colorInput" type="color" value="#38bdf8" aria-label="Current color">
+              <button id="addColorBtn" title="Add color">+</button>
+            </div>
+            <div id="palette" class="palette" aria-label="Palette"></div>
+          </div>
+
+          <div class="control-block">
+            <label>Mirror</label>
+            <div class="segmented">
+              <button class="mirror active" data-mirror="none">Off</button>
+              <button class="mirror" data-mirror="x">X</button>
+              <button class="mirror" data-mirror="z">Z</button>
+              <button class="mirror" data-mirror="both">Both</button>
+            </div>
+          </div>
+
+          <div class="control-block compact-actions">
+            <button id="undoBtn" title="Undo">Undo</button>
+            <button id="redoBtn" title="Redo">Redo</button>
+            <button id="clearBtn" title="Clear canvas">Clear</button>
+          </div>
+        </aside>
+
+        <section class="canvas-wrap" aria-label="Voxel canvas">
+          <canvas id="voxelCanvas" width="1200" height="850"></canvas>
+          <div class="canvas-hud">
+            <div class="pill" id="toolReadout">Brush</div>
+            <div class="pill" id="cubeCount">0 cubes</div>
+          </div>
+        </section>
+
+        <aside class="panel build-panel" aria-label="Build controls">
+          <div class="control-block">
+            <label for="layerRange">Layer <span id="layerValue">1</span></label>
+            <input id="layerRange" type="range" min="0" max="15" value="0">
+            <div class="stepper">
+              <button id="layerDown" title="Layer down">-</button>
+              <button id="layerUp" title="Layer up">+</button>
+            </div>
+          </div>
+
+          <div class="control-block">
+            <label>View</label>
+            <div class="segmented two">
+              <button id="gridBtn" class="active">Grid</button>
+              <button id="shadowBtn" class="active">Shade</button>
+            </div>
+            <div class="sliders">
+              <label for="zoomRange">Zoom</label>
+              <input id="zoomRange" type="range" min="34" max="78" value="52">
+              <label for="angleRange">Orbit</label>
+              <input id="angleRange" type="range" min="0" max="360" value="45">
+            </div>
+          </div>
+
+          <div class="control-block">
+            <label for="templateSelect">Template</label>
+            <select id="templateSelect">
+              <option value="blank">Blank grid</option>
+              <option value="character">Character</option>
+              <option value="item">Item</option>
+              <option value="building">Building</option>
+            </select>
+            <button id="templateBtn">Start</button>
+          </div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="script.js"></script>
+  </body>
+</html>
