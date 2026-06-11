@@ -11,6 +11,7 @@ const state = {
   tool: "brush",
   layer: 0,
   angle: 45,
+  pitch: 32,
   zoom: 52,
   panX: 0,
   panY: 18,
@@ -21,12 +22,13 @@ const state = {
   drag: null,
   history: [],
   future: [],
-  palette: ["#38bdf8", "#fb7185", "#84cc16", "#f59e0b", "#a78bfa", "#f8fafc", "#1f2937", "#ef4444", "#22c55e", "#facc15"]
+  palette: ["#ef4444", "#fb7185", "#f59e0b", "#facc15", "#84cc16", "#22c55e", "#38bdf8", "#a78bfa", "#1f2937", "#f8fafc"]
 };
 
 const els = {
   saveStatus: document.getElementById("saveStatus"),
   toolReadout: document.getElementById("toolReadout"),
+  layerReadout: document.getElementById("layerReadout"),
   cubeCount: document.getElementById("cubeCount"),
   colorInput: document.getElementById("colorInput"),
   palette: document.getElementById("palette"),
@@ -75,9 +77,12 @@ function rotatePoint(x, z) {
 function project(x, y, z) {
   const r = rotatePoint(x, z);
   const c = center();
+  const pitch = state.pitch * Math.PI / 180;
+  const groundScale = 0.12 + Math.sin(pitch) * 0.26;
+  const heightScale = 0.34 + Math.cos(pitch) * 0.26;
   return {
     x: c.x + (r.x - r.z) * state.zoom * 0.5,
-    y: c.y + (r.x + r.z) * state.zoom * 0.26 - y * state.zoom * 0.55
+    y: c.y + (r.x + r.z) * state.zoom * groundScale - y * state.zoom * heightScale
   };
 }
 
@@ -93,10 +98,34 @@ function cubeFaces(x, y, z) {
 
   return {
     top: [p010, p110, p111, p011],
-    left: [p000, p010, p011, p001],
-    right: [p100, p101, p111, p110],
+    xMin: [p000, p010, p011, p001],
+    xMax: [p100, p101, p111, p110],
+    zMin: [p000, p100, p110, p010],
+    zMax: [p001, p011, p111, p101],
     footprint: [p000, p100, p101, p001]
   };
+}
+
+function depthAt(x, y, z) {
+  const r = rotatePoint(x, z);
+  return r.x + r.z + y * 0.01;
+}
+
+function visibleSideFaces(faces, x, y, z, color) {
+  const a = state.angle * Math.PI / 180;
+  const xFacing = Math.cos(a) + Math.sin(a) >= 0 ? "xMax" : "xMin";
+  const zFacing = Math.cos(a) - Math.sin(a) >= 0 ? "zMax" : "zMin";
+  const sideConfig = {
+    xMin: { center: [x, y + 0.5, z + 0.5], shade: -34 },
+    xMax: { center: [x + 1, y + 0.5, z + 0.5], shade: -22 },
+    zMin: { center: [x + 0.5, y + 0.5, z], shade: -34 },
+    zMax: { center: [x + 0.5, y + 0.5, z + 1], shade: -22 }
+  };
+
+  return [...new Set([xFacing, zFacing])]
+    .map((name) => ({ name, ...sideConfig[name] }))
+    .sort((aFace, bFace) => depthAt(...aFace.center) - depthAt(...bFace.center))
+    .map((face) => ({ points: faces[face.name], fill: shadeColor(color, face.shade) }));
 }
 
 function shadeColor(hex, amount) {
@@ -134,9 +163,25 @@ function drawGrid() {
 
 function drawCube(x, y, z, color) {
   const faces = cubeFaces(x, y, z);
-  drawPoly(faces.left, shadeColor(color, -34));
-  drawPoly(faces.right, shadeColor(color, -18));
+  visibleSideFaces(faces, x, y, z, color).forEach((face) => drawPoly(face.points, face.fill));
   drawPoly(faces.top, shadeColor(color, 18), "rgba(27, 36, 48, 0.18)");
+}
+
+function drawLayerGuide() {
+  const corners = [
+    project(0, state.layer, 0),
+    project(GRID, state.layer, 0),
+    project(GRID, state.layer, GRID),
+    project(0, state.layer, GRID)
+  ];
+  drawPoly(corners, "rgba(251, 113, 133, 0.08)", "rgba(251, 113, 133, 0.44)");
+
+  const labelAnchor = project(0, state.layer, 0);
+  ctx.save();
+  ctx.fillStyle = "rgba(23, 32, 51, 0.82)";
+  ctx.font = "800 13px Inter, ui-sans-serif, system-ui, sans-serif";
+  ctx.fillText(`Layer ${state.layer + 1}`, labelAnchor.x + 10, labelAnchor.y - 10);
+  ctx.restore();
 }
 
 function sortedVoxels() {
@@ -154,12 +199,27 @@ function drawHover() {
   const { x, z } = state.hover;
   const faces = cubeFaces(x, state.layer, z);
   const fill = state.tool === "erase" ? "rgba(251, 113, 133, 0.32)" : "rgba(56, 189, 248, 0.28)";
-  drawPoly(faces.top, fill, "rgba(23, 32, 51, 0.46)");
+  if (state.layer > 0) {
+    const bottom = project(x + 0.5, 0, z + 0.5);
+    const top = project(x + 0.5, state.layer, z + 0.5);
+    ctx.save();
+    ctx.setLineDash([5, 5]);
+    ctx.strokeStyle = "rgba(23, 32, 51, 0.5)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(bottom.x, bottom.y);
+    ctx.lineTo(top.x, top.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+  visibleSideFaces(faces, x, state.layer, z, state.currentColor).forEach((face) => drawPoly(face.points, fill, "rgba(23, 32, 51, 0.32)"));
+  drawPoly(faces.top, fill, "rgba(23, 32, 51, 0.58)");
 }
 
 function draw() {
   const rect = canvas.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
+  drawLayerGuide();
   drawGrid();
   sortedVoxels().forEach(({ pos, color }) => drawCube(pos[0], pos[1], pos[2], color));
   drawHover();
@@ -283,6 +343,7 @@ function setColor(color) {
 
 function renderPalette() {
   els.palette.innerHTML = "";
+  state.palette = sortPalette(state.palette);
   state.palette.forEach((color) => {
     const btn = document.createElement("button");
     btn.className = `swatch${color.toLowerCase() === state.currentColor.toLowerCase() ? " active" : ""}`;
@@ -294,11 +355,44 @@ function renderPalette() {
   });
 }
 
+function colorInfo(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  const chroma = max - min;
+  let hue = 0;
+  if (chroma) {
+    if (max === r / 255) hue = ((g - b) / 255 / chroma + 6) % 6;
+    else if (max === g / 255) hue = (b - r) / 255 / chroma + 2;
+    else hue = (r - g) / 255 / chroma + 4;
+    hue *= 60;
+  }
+  return { hue, chroma, lightness: (max + min) / 2 };
+}
+
+function sortPalette(colors) {
+  return [...colors].sort((a, b) => {
+    const ai = colorInfo(a);
+    const bi = colorInfo(b);
+    const aNeutral = ai.chroma < 0.15;
+    const bNeutral = bi.chroma < 0.15;
+    if (aNeutral !== bNeutral) return aNeutral ? 1 : -1;
+    if (aNeutral && bNeutral) return ai.lightness - bi.lightness;
+    const aHue = ai.hue >= 330 ? ai.hue - 315 : ai.hue;
+    const bHue = bi.hue >= 330 ? bi.hue - 315 : bi.hue;
+    return aHue - bHue || bi.chroma - ai.chroma;
+  });
+}
+
 function updateReadouts() {
-  const toolName = state.tool.charAt(0).toUpperCase() + state.tool.slice(1);
+  const toolName = state.tool === "erase" ? "Eraser" : state.tool.charAt(0).toUpperCase() + state.tool.slice(1);
   els.toolReadout.textContent = toolName;
   els.cubeCount.textContent = `${state.voxels.size} cube${state.voxels.size === 1 ? "" : "s"}`;
   els.layerValue.textContent = String(state.layer + 1);
+  els.layerReadout.textContent = `Layer ${state.layer + 1}`;
 }
 
 function download(filename, content, type) {
@@ -402,16 +496,16 @@ function loadTemplate(name) {
   pushHistory();
   state.voxels.clear();
   if (name === "character") {
-    for (let y = 0; y < 6; y += 1) for (let x = 6; x <= 9; x += 1) addVoxel(x, y, 8, "#38bdf8");
-    [[6, 6], [7, 6], [8, 6], [9, 6], [7, 7], [8, 7]].forEach(([x, y]) => addVoxel(x, y, 8, "#facc15"));
-    addVoxel(7, 7, 7, "#1f2937");
-    addVoxel(8, 7, 7, "#1f2937");
-    addVoxel(5, 3, 8, "#fb7185");
-    addVoxel(10, 3, 8, "#fb7185");
+    [[7, 10], [8, 10], [6, 9], [7, 9], [8, 9], [9, 9], [7, 8], [8, 8]].forEach(([x, y]) => addVoxel(x, y, 8, "#facc15"));
+    for (let y = 4; y <= 7; y += 1) addVoxel(8, y, 8, "#38bdf8");
+    for (let x = 5; x <= 11; x += 1) addVoxel(x, 6, 8, "#38bdf8");
+    [[7, 3], [6, 2], [9, 3], [10, 2]].forEach(([x, y]) => addVoxel(x, y, 8, "#1f2937"));
+    addVoxel(7, 9, 7, "#1f2937");
+    addVoxel(8, 9, 7, "#1f2937");
   }
   if (name === "item") {
     for (let y = 0; y < 8; y += 1) addVoxel(8, y, 8, "#a78bfa");
-    for (let x = 5; x <= 11; x += 1) addVoxel(x, 5, 8, "#f59e0b");
+    for (let z = 5; z <= 11; z += 1) addVoxel(8, 5, z, "#f59e0b");
     addVoxel(8, 8, 8, "#f8fafc");
   }
   if (name === "building") {
@@ -423,6 +517,8 @@ function loadTemplate(name) {
       }
     }
     for (let x = 4; x <= 11; x += 1) for (let z = 4; z <= 11; z += 1) addVoxel(x, 5, z, "#ef4444");
+    for (let y = 0; y <= 2; y += 1) addVoxel(10, y, 7, "#1f2937");
+    [[10, 3, 5], [10, 3, 10]].forEach(([x, y, z]) => addVoxel(x, y, z, "#38bdf8"));
   }
   els.saveStatus.textContent = name === "blank" ? "Blank" : "Template ready";
   updateReadouts();
@@ -444,12 +540,15 @@ document.querySelectorAll(".mirror").forEach((button) => {
   });
 });
 
+canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
 canvas.addEventListener("pointerdown", (event) => {
   canvas.setPointerCapture(event.pointerId);
-  if (event.button === 1 || event.shiftKey || event.metaKey || event.ctrlKey) {
+  if (event.button === 2 || event.altKey) {
+    state.drag = { type: "orbit", x: event.clientX, y: event.clientY, angle: state.angle, pitch: state.pitch };
+    canvas.classList.add("orbiting");
+  } else if (event.button === 1 || event.shiftKey || event.metaKey || event.ctrlKey) {
     state.drag = { type: "pan", x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY };
-  } else if (event.altKey) {
-    state.drag = { type: "orbit", x: event.clientX, angle: state.angle };
   } else {
     state.drag = { type: "paint" };
     handlePaint(event.clientX, event.clientY);
@@ -465,6 +564,7 @@ canvas.addEventListener("pointermove", (event) => {
   }
   if (state.drag?.type === "orbit") {
     state.angle = (state.drag.angle + (event.clientX - state.drag.x) * 0.6 + 360) % 360;
+    state.pitch = Math.max(16, Math.min(64, state.drag.pitch - (event.clientY - state.drag.y) * 0.22));
     els.angleRange.value = String(Math.round(state.angle));
     draw();
     return;
@@ -478,6 +578,12 @@ canvas.addEventListener("pointermove", (event) => {
 canvas.addEventListener("pointerup", (event) => {
   canvas.releasePointerCapture(event.pointerId);
   state.drag = null;
+  canvas.classList.remove("orbiting");
+});
+
+canvas.addEventListener("pointercancel", () => {
+  state.drag = null;
+  canvas.classList.remove("orbiting");
 });
 
 canvas.addEventListener("wheel", (event) => {
