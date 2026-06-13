@@ -19,12 +19,26 @@
         </div>
 
         <div class="quick-actions" aria-label="File actions">
+          <button id="newDesignBtn" title="Start a new design">New</button>
           <button id="saveBtn" title="Save artwork">Save</button>
-          <button id="loadBtn" title="Load saved artwork">Load</button>
+          <button id="loadBtn" title="View saved designs">Designs</button>
           <button id="pngBtn" title="Export PNG">PNG</button>
           <button id="objBtn" title="Export OBJ">OBJ</button>
         </div>
       </header>
+
+      <section id="dashboard" class="panel dashboard" aria-label="Saved designs">
+        <div class="dashboard-header">
+          <div class="design-name-field">
+            <label for="designName">Current design</label>
+            <input id="designName" type="text" value="Untitled design" maxlength="40">
+          </div>
+          <div class="dashboard-actions">
+            <button id="saveCopyBtn" title="Save as a new design">Save copy</button>
+          </div>
+        </div>
+        <div id="designGrid" class="design-grid" aria-live="polite"></div>
+      </section>
 
       <section class="studio">
         <aside class="panel tool-panel" aria-label="Tools">
@@ -102,7 +116,7 @@
               <option value="item">Item</option>
               <option value="building">Building</option>
             </select>
-            <button id="templateBtn">Start</button>
+            <button id="templateBtn">Apply template</button>
           </div>
         </aside>
       </section>

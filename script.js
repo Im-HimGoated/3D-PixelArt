@@ -1,6 +1,7 @@
 const GRID = 16;
 const MAX_LAYER = 15;
 const STORAGE_KEY = "voxel-pop-studio-art";
+const DESIGNS_STORAGE_KEY = "voxel-pop-studio-designs";
 
 const canvas = document.getElementById("voxelCanvas");
 const ctx = canvas.getContext("2d");
@@ -22,6 +23,9 @@ const state = {
   drag: null,
   history: [],
   future: [],
+  currentDesignId: null,
+  designName: "Untitled design",
+  designs: [],
   palette: ["#ef4444", "#fb7185", "#f59e0b", "#facc15", "#84cc16", "#22c55e", "#38bdf8", "#a78bfa", "#1f2937", "#f8fafc"]
 };
 
@@ -32,6 +36,9 @@ const els = {
   cubeCount: document.getElementById("cubeCount"),
   colorInput: document.getElementById("colorInput"),
   palette: document.getElementById("palette"),
+  dashboard: document.getElementById("dashboard"),
+  designName: document.getElementById("designName"),
+  designGrid: document.getElementById("designGrid"),
   layerRange: document.getElementById("layerRange"),
   layerValue: document.getElementById("layerValue"),
   zoomRange: document.getElementById("zoomRange"),
@@ -80,9 +87,10 @@ function project(x, y, z) {
   const pitch = state.pitch * Math.PI / 180;
   const groundScale = 0.12 + Math.sin(pitch) * 0.26;
   const heightScale = 0.34 + Math.cos(pitch) * 0.26;
+  const layerFocus = state.layer * heightScale * 0.72;
   return {
     x: c.x + (r.x - r.z) * state.zoom * 0.5,
-    y: c.y + (r.x + r.z) * state.zoom * groundScale - y * state.zoom * heightScale
+    y: c.y + (r.x + r.z) * state.zoom * groundScale + layerFocus * state.zoom - y * state.zoom * heightScale
   };
 }
 
@@ -151,12 +159,32 @@ function drawPoly(points, fill, stroke = "rgba(27, 36, 48, 0.16)") {
   ctx.stroke();
 }
 
+function drawLine(from, to, stroke, width = 1, dash = []) {
+  ctx.save();
+  ctx.setLineDash(dash);
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawGrid() {
   if (!state.showGrid) return;
+  if (state.layer > 0) {
+    for (let x = 0; x < GRID; x += 1) {
+      for (let z = 0; z < GRID; z += 1) {
+        const faces = cubeFaces(x, 0, z);
+        drawPoly(faces.footprint, "rgba(255, 255, 255, 0.1)", "rgba(70, 91, 104, 0.08)");
+      }
+    }
+  }
   for (let x = 0; x < GRID; x += 1) {
     for (let z = 0; z < GRID; z += 1) {
       const faces = cubeFaces(x, state.layer, z);
-      drawPoly(faces.footprint, "rgba(255, 255, 255, 0.36)", "rgba(70, 91, 104, 0.14)");
+      drawPoly(faces.footprint, "rgba(255, 255, 255, 0.42)", "rgba(27, 36, 48, 0.22)");
     }
   }
 }
@@ -168,13 +196,37 @@ function drawCube(x, y, z, color) {
 }
 
 function drawLayerGuide() {
+  if (state.layer > 0) {
+    const scaffoldPoints = [
+      [0, 0],
+      [GRID, 0],
+      [GRID, GRID],
+      [0, GRID],
+      [GRID / 2, 0],
+      [GRID, GRID / 2],
+      [GRID / 2, GRID],
+      [0, GRID / 2]
+    ];
+    scaffoldPoints.forEach(([x, z]) => {
+      drawLine(project(x, 0, z), project(x, state.layer, z), "rgba(23, 32, 51, 0.26)", 1.25, [5, 6]);
+    });
+  }
+
+  const baseCorners = [
+    project(0, 0, 0),
+    project(GRID, 0, 0),
+    project(GRID, 0, GRID),
+    project(0, 0, GRID)
+  ];
+  drawPoly(baseCorners, "rgba(255, 255, 255, 0.08)", "rgba(70, 91, 104, 0.18)");
+
   const corners = [
     project(0, state.layer, 0),
     project(GRID, state.layer, 0),
     project(GRID, state.layer, GRID),
     project(0, state.layer, GRID)
   ];
-  drawPoly(corners, "rgba(251, 113, 133, 0.08)", "rgba(251, 113, 133, 0.44)");
+  drawPoly(corners, "rgba(251, 113, 133, 0.1)", "rgba(251, 113, 133, 0.62)");
 
   const labelAnchor = project(0, state.layer, 0);
   ctx.save();
@@ -262,6 +314,134 @@ function snapshot() {
 
 function restore(snapshotText) {
   state.voxels = new Map(JSON.parse(snapshotText));
+}
+
+function serializeArtwork() {
+  return {
+    voxels: [...state.voxels.entries()],
+    palette: state.palette,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function applyArtwork(data) {
+  state.voxels = new Map(data.voxels || []);
+  state.palette = data.palette || state.palette;
+  renderPalette();
+  updateReadouts();
+  draw();
+}
+
+function makeDesignId() {
+  return `design-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function normalizedDesignName() {
+  return (els.designName.value || "").trim() || "Untitled design";
+}
+
+function sortedDesigns() {
+  return [...state.designs].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+}
+
+function saveDesignStore() {
+  localStorage.setItem(DESIGNS_STORAGE_KEY, JSON.stringify(state.designs));
+}
+
+function loadDesignStore() {
+  let designs = [];
+  try {
+    designs = JSON.parse(localStorage.getItem(DESIGNS_STORAGE_KEY) || "[]");
+  } catch {
+    designs = [];
+  }
+
+  if (!designs.length) {
+    try {
+      const legacy = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+      if (legacy?.voxels?.length) {
+        designs.push({
+          id: makeDesignId(),
+          name: "Recovered design",
+          voxels: legacy.voxels,
+          palette: legacy.palette || state.palette,
+          updatedAt: legacy.savedAt || new Date().toISOString()
+        });
+      }
+    } catch {
+      designs = [];
+    }
+  }
+
+  state.designs = designs;
+  saveDesignStore();
+}
+
+function designColors(design) {
+  const counts = new Map();
+  (design.voxels || []).forEach(([, color]) => counts.set(color, (counts.get(color) || 0) + 1));
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([color]) => color)
+    .slice(0, 12);
+}
+
+function renderDesignDashboard() {
+  els.designName.value = state.designName;
+  els.designGrid.innerHTML = "";
+
+  if (!state.designs.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-designs";
+    empty.textContent = "No saved designs yet.";
+    els.designGrid.appendChild(empty);
+    return;
+  }
+
+  sortedDesigns().forEach((design) => {
+    const card = document.createElement("article");
+    card.className = `design-card${design.id === state.currentDesignId ? " active" : ""}`;
+
+    const preview = document.createElement("div");
+    preview.className = "design-preview";
+    const colors = designColors(design);
+    const previewColors = colors.length ? colors : ["#f8fafc"];
+    previewColors.forEach((color) => {
+      const chip = document.createElement("span");
+      chip.className = "preview-cube";
+      chip.style.background = color;
+      preview.appendChild(chip);
+    });
+
+    const meta = document.createElement("div");
+    meta.className = "design-meta";
+    const title = document.createElement("h2");
+    title.className = "design-title";
+    title.textContent = design.name || "Untitled design";
+    const count = document.createElement("div");
+    count.className = "design-detail";
+    const cubeCount = (design.voxels || []).length;
+    count.textContent = `${cubeCount} cube${cubeCount === 1 ? "" : "s"}`;
+    const updated = document.createElement("div");
+    updated.className = "design-detail";
+    updated.textContent = design.updatedAt ? `Saved ${new Date(design.updatedAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : "Not saved";
+    meta.append(title, count, updated);
+
+    const actions = document.createElement("div");
+    actions.className = "design-card-actions";
+    const loadButton = document.createElement("button");
+    loadButton.type = "button";
+    loadButton.textContent = "Load";
+    loadButton.addEventListener("click", () => loadDesign(design.id));
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.textContent = "Delete";
+    deleteButton.addEventListener("click", () => deleteDesign(design.id));
+    actions.append(loadButton, deleteButton);
+
+    card.append(preview, meta, actions);
+    els.designGrid.appendChild(card);
+  });
 }
 
 function pushHistory() {
@@ -407,30 +587,72 @@ function download(filename, content, type) {
   URL.revokeObjectURL(url);
 }
 
-function saveArt() {
-  const data = {
-    voxels: [...state.voxels.entries()],
-    palette: state.palette,
-    savedAt: new Date().toISOString()
-  };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  els.saveStatus.textContent = "Saved locally";
+function saveArt({ forceNew = false } = {}) {
+  const name = normalizedDesignName();
+  const data = serializeArtwork();
+  let design = !forceNew && state.currentDesignId
+    ? state.designs.find((item) => item.id === state.currentDesignId)
+    : null;
+
+  if (!design) {
+    design = { id: makeDesignId(), name, ...data };
+    state.designs.push(design);
+    state.currentDesignId = design.id;
+  } else {
+    Object.assign(design, { name, ...data });
+  }
+
+  state.designName = name;
+  saveDesignStore();
+  renderDesignDashboard();
+  els.saveStatus.textContent = forceNew ? `Saved copy: ${name}` : `Saved: ${name}`;
+}
+
+function loadDesign(designId) {
+  const design = state.designs.find((item) => item.id === designId);
+  if (!design) return;
+  pushHistory();
+  state.currentDesignId = design.id;
+  state.designName = design.name || "Untitled design";
+  els.designName.value = state.designName;
+  applyArtwork(design);
+  renderDesignDashboard();
+  els.saveStatus.textContent = `Loaded: ${state.designName}`;
+}
+
+function deleteDesign(designId) {
+  const design = state.designs.find((item) => item.id === designId);
+  if (!design) return;
+  const shouldDelete = window.confirm(`Delete "${design.name || "Untitled design"}"?`);
+  if (!shouldDelete) return;
+
+  state.designs = state.designs.filter((item) => item.id !== designId);
+  if (state.currentDesignId === designId) {
+    state.currentDesignId = null;
+    state.designName = "Untitled design";
+    els.designName.value = state.designName;
+  }
+  saveDesignStore();
+  renderDesignDashboard();
+  els.saveStatus.textContent = "Design deleted";
+}
+
+function newDesign() {
+  pushHistory();
+  state.voxels.clear();
+  state.currentDesignId = null;
+  state.designName = "Untitled design";
+  els.designName.value = state.designName;
+  els.templateSelect.value = "blank";
+  state.future = [];
+  updateReadouts();
+  renderDesignDashboard();
+  draw();
+  els.saveStatus.textContent = "New unsaved design";
 }
 
 function loadArt() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) {
-    els.saveStatus.textContent = "No saved artwork";
-    return;
-  }
-  const data = JSON.parse(saved);
-  pushHistory();
-  state.voxels = new Map(data.voxels || []);
-  state.palette = data.palette || state.palette;
-  els.saveStatus.textContent = "Loaded";
-  renderPalette();
-  updateReadouts();
-  draw();
+  els.dashboard.classList.toggle("collapsed");
 }
 
 function exportPng() {
@@ -495,6 +717,12 @@ function addVoxel(x, y, z, color) {
 function loadTemplate(name) {
   pushHistory();
   state.voxels.clear();
+  const templateNames = {
+    blank: "Blank grid",
+    character: "Stick figure",
+    item: "Sword",
+    building: "House"
+  };
   if (name === "character") {
     [[7, 10], [8, 10], [6, 9], [7, 9], [8, 9], [9, 9], [7, 8], [8, 8]].forEach(([x, y]) => addVoxel(x, y, 8, "#facc15"));
     for (let y = 4; y <= 7; y += 1) addVoxel(8, y, 8, "#38bdf8");
@@ -520,7 +748,7 @@ function loadTemplate(name) {
     for (let y = 0; y <= 2; y += 1) addVoxel(10, y, 7, "#1f2937");
     [[10, 3, 5], [10, 3, 10]].forEach(([x, y, z]) => addVoxel(x, y, z, "#38bdf8"));
   }
-  els.saveStatus.textContent = name === "blank" ? "Blank" : "Template ready";
+  els.saveStatus.textContent = `${templateNames[name] || "Template"} applied (${state.voxels.size} cubes)`;
   updateReadouts();
   draw();
 }
@@ -594,12 +822,17 @@ canvas.addEventListener("wheel", (event) => {
 }, { passive: false });
 
 els.colorInput.addEventListener("input", (event) => setColor(event.target.value));
+els.designName.addEventListener("input", () => {
+  state.designName = normalizedDesignName();
+});
 document.getElementById("addColorBtn").addEventListener("click", () => {
   if (!state.palette.includes(state.currentColor)) state.palette.unshift(state.currentColor);
   state.palette = state.palette.slice(0, 15);
   renderPalette();
 });
+document.getElementById("newDesignBtn").addEventListener("click", newDesign);
 document.getElementById("saveBtn").addEventListener("click", saveArt);
+document.getElementById("saveCopyBtn").addEventListener("click", () => saveArt({ forceNew: true }));
 document.getElementById("loadBtn").addEventListener("click", loadArt);
 document.getElementById("pngBtn").addEventListener("click", exportPng);
 document.getElementById("objBtn").addEventListener("click", exportObj);
@@ -642,6 +875,7 @@ els.angleRange.addEventListener("input", (event) => {
   draw();
 });
 document.getElementById("templateBtn").addEventListener("click", () => loadTemplate(els.templateSelect.value));
+els.templateSelect.addEventListener("change", () => loadTemplate(els.templateSelect.value));
 
 window.addEventListener("keydown", (event) => {
   if (event.target.matches("input, select")) return;
@@ -660,6 +894,16 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("resize", resizeCanvas);
-renderPalette();
-updateReadouts();
+loadDesignStore();
+const initialDesign = sortedDesigns()[0];
+if (initialDesign) {
+  state.currentDesignId = initialDesign.id;
+  state.designName = initialDesign.name || "Untitled design";
+  els.saveStatus.textContent = `Loaded: ${state.designName}`;
+  applyArtwork(initialDesign);
+} else {
+  renderPalette();
+  updateReadouts();
+}
+renderDesignDashboard();
 resizeCanvas();
